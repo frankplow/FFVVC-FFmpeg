@@ -39,7 +39,7 @@ struct VVCFrameThread {
     // error return for tasks
     atomic_int ret;
 
-    atomic_uchar *avails;
+    atomic_uint *avails;
 
     VVCRowThread *rows;
     VVCColThread *cols;
@@ -61,7 +61,7 @@ struct VVCFrameThread {
 
 static int get_avail(const VVCFrameThread *ft, const int rx, const int ry, const VVCTaskType type)
 {
-    atomic_uchar *avail;
+    atomic_uint *avail;
     if (rx < 0 || ry < 0)
         return 1;
     avail = ft->avails + FFMIN(ry,  ft->ctu_height - 1)* ft->ctu_width + FFMIN(rx, ft->ctu_width - 1);
@@ -70,7 +70,7 @@ static int get_avail(const VVCFrameThread *ft, const int rx, const int ry, const
 
 static void set_avail(const VVCFrameThread *ft, const int rx, const int ry, const VVCTaskType type)
 {
-    atomic_uchar *avail = ft->avails + ry * ft->ctu_width + rx;
+    atomic_uint *avail = ft->avails + ry * ft->ctu_width + rx;
     if (rx < 0 || rx >= ft->ctu_width || ry < 0 || ry >= ft->ctu_height)
         return;
     atomic_fetch_or(avail, 1 << type);
@@ -727,7 +727,7 @@ int ff_vvc_frame_wait(VVCContext *s, VVCFrameContext *fc)
         if (check_missed_slices && !ft->nb_parse_tasks) {
             // abort for missed slices
             for (int rs = 0; rs < ft->ctu_count; rs++){
-                atomic_uchar mask = 1 << VVC_TASK_TYPE_PARSE;
+                atomic_uint mask = 1 << VVC_TASK_TYPE_PARSE;
                 if (!(atomic_load(ft->avails + rs) & mask)) {
                     atomic_store(&ft->ret, AVERROR_INVALIDDATA);
                     // maybe all thread are waiting, let us wake up them
