@@ -717,6 +717,7 @@ fail:
 
 static int frame_context_setup(VVCFrameContext *fc, VVCContext *s)
 {
+    const VVCSPS *sps = fc->ps.sps;
     int ret = 0;
 
     // copy refs from the last frame
@@ -740,8 +741,8 @@ static int frame_context_setup(VVCFrameContext *fc, VVCContext *s)
     ret = pic_arrays_init(s, fc);
     if (ret < 0)
         goto fail;
-    ff_vvc_dsp_init(&fc->vvcdsp, fc->ps.sps->bit_depth);
-    ff_videodsp_init(&fc->vdsp, fc->ps.sps->bit_depth);
+    ff_vvc_dsp_init(&fc->vvcdsp, sps->bit_depth);
+    ff_videodsp_init(&fc->vdsp, sps->bit_depth);
 
 fail:
     return ret;
