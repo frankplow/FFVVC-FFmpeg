@@ -30,7 +30,7 @@
 #include "vvc_intra_template.c"
 #include "vvc_filter_template.c"
 
-static void FUNC(add_residual)(uint8_t *_dst, const int *res,
+static void FUNC(add_residual)(uint8_t *_dst, const int32_t *res,
     const int w, const int h, const ptrdiff_t _stride)
 {
     pixel *dst          = (pixel *)_dst;
@@ -46,7 +46,7 @@ static void FUNC(add_residual)(uint8_t *_dst, const int *res,
     }
 }
 
-static void FUNC(add_residual_joint)(uint8_t *_dst, const int *res,
+static void FUNC(add_residual_joint)(uint8_t *_dst, const int32_t *res,
     const int w, const int h, const ptrdiff_t _stride, const int c_sign, const int shift)
 {
     pixel *dst = (pixel *)_dst;
@@ -55,7 +55,7 @@ static void FUNC(add_residual_joint)(uint8_t *_dst, const int *res,
 
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            const int r = ((*res) * c_sign) >> shift;
+            const int32_t r = ((*res) * c_sign) >> shift;
             dst[x] = av_clip_pixel(dst[x] + r);
             res++;
         }
@@ -63,7 +63,7 @@ static void FUNC(add_residual_joint)(uint8_t *_dst, const int *res,
     }
 }
 
-static void FUNC(pred_residual_joint)(int *buf, const int w, const int h,
+static void FUNC(pred_residual_joint)(int32_t *buf, const int w, const int h,
     const int c_sign, const int shift)
 {
     for (int y = 0; y < h; y++) {
@@ -74,7 +74,7 @@ static void FUNC(pred_residual_joint)(int *buf, const int w, const int h,
     }
 }
 
-static void FUNC(transform_bdpcm)(int *coeffs, const int width, const int height,
+static void FUNC(transform_bdpcm)(int32_t *coeffs, const int width, const int height,
     const int vertical, const int log2_transform_range)
 {
     int x, y;
@@ -200,10 +200,10 @@ static void FUNC(transform_bdpcm)(int *coeffs, const int width, const int height
 // ITX function prototypes
 #undef ITX_2D
 #define ITX_2D(TYPE_H, type_h, TYPE_V, type_v, width, height)                   \
-static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int *dst,        \
-    const int *coeff, int nzw, int log2_transform_range)                        \
+static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int32_t *dst,    \
+    const int32_t *coeff, int nzw, int log2_transform_range)                    \
 {                                                                               \
-    DECLARE_ALIGNED(32, int, temp)[width * height];                             \
+    DECLARE_ALIGNED(32, int32_t, temp)[width * height];                         \
                                                                                 \
     for (int x = 0; x < nzw; x++)                                               \
         ff_vvc_inv_##type_v##_##height(temp + x, width, coeff + x, width);      \
@@ -217,28 +217,28 @@ static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int *dst,        
 }
 #undef ITX_1D_H
 #define ITX_1D_H(TYPE_H, type_h, TYPE_V, type_v, width, height)                 \
-static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int *dst,        \
-    const int *coeff, int nzw, int log2_transform_range)                        \
+static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int32_t *dst,    \
+    const int32_t *coeff, int nzw, int log2_transform_range)                    \
 {                                                                               \
-    DECLARE_ALIGNED(32, int, temp)[width * height];                             \
+    DECLARE_ALIGNED(32, int32_t, temp)[width * height];                         \
                                                                                 \
     ff_vvc_inv_##type_h##_##width(temp, 1, coeff, 1);                           \
     scale(dst, temp, width, height, 6 + log2_transform_range - BIT_DEPTH);      \
 }
 #undef ITX_1D_V
 #define ITX_1D_V(TYPE_H, type_h, TYPE_V, type_v, width, height)                 \
-static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int *dst,        \
-    const int *coeff, int nzw, int log2_transform_range)                        \
+static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int32_t *dst,    \
+    const int32_t *coeff, int nzw, int log2_transform_range)                    \
 {                                                                               \
-    DECLARE_ALIGNED(32, int, temp)[width * height];                             \
+    DECLARE_ALIGNED(32, int32_t, temp)[width * height];                         \
                                                                                 \
     ff_vvc_inv_##type_v##_##height(temp, 1, coeff, 1);                          \
     scale(dst, temp, width, height, 6 + log2_transform_range - BIT_DEPTH);      \
 }
 #undef ITX_1x1
 #define ITX_1x1(TYPE_H, type_h, TYPE_V, type_v, width, height)                  \
-static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int *dst,        \
-    const int *coeff, int nzw, int log2_transform_range)                        \
+static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int32_t *dst,    \
+    const int32_t *coeff, int nzw, int log2_transform_range)                    \
 {                                                                               \
     scale(dst, coeff, width, height, 6 + log2_transform_range - BIT_DEPTH);     \
 }

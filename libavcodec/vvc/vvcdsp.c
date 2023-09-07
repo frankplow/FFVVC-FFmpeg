@@ -64,12 +64,12 @@ static int vvc_sad(const int16_t *src0, const int16_t *src1, int dx, int dy,
     return sad;
 }
 
-static void scale_clip(int *coeff, const int nzw, const int w, const int h,
+static void scale_clip(int32_t *coeff, const int nzw, const int w, const int h,
     const int shift, const int log2_transform_range)
 {
-    const int add = 1 << (shift - 1);
+    const int32_t add = 1 << (shift - 1);
     for (int y = 0; y < h; y++) {
-        int *p = coeff + y * w;
+        int32_t *p = coeff + y * w;
         for (int x = 0; x < nzw; x++) {
             *p = av_clip_intp2((*p + add) >> shift, log2_transform_range);
             p++;
@@ -78,12 +78,12 @@ static void scale_clip(int *coeff, const int nzw, const int w, const int h,
     }
 }
 
-static void scale(int *out, const int *in, const int w, const int h, const int shift)
+static void scale(int32_t *out, const int32_t *in, const int w, const int h, const int shift)
 {
-    const int add = 1 << (shift - 1);
+    const int32_t add = 1 << (shift - 1);
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            int *o = out + y * w + x;
+            int32_t *o = out + y * w + x;
             const int *i = in + y * w + x;
             *o = (*i + add) >> shift;
         }
