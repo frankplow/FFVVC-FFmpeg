@@ -50,19 +50,18 @@ SECTION .text
 INIT_XMM avx2
 
 %macro IDCT2_4 0
-    ;      0    16    32    48    64    80    96   112   128
-    ; m0 = | x00 | x20 | x01 | x21 | x02 | x22 | x03 | x23 |
-    ; m1 = | x10 | x30 | x11 | x31 | x12 | x32 | x13 | x33 |
-    SBUTTERFLY      wd, 0, 1, 2
+    punpckhwd       m4, m0, m1
+    punpcklwd       m0, m1
 
-    pmaddwd         m2, m0, [vvc_pw_64_64]      ; z0
-    pmaddwd         m3, m1, [vvc_pw_m36_83]     ; z2
-    pmaddwd         m0, [vvc_pw_64_m64]         ; z1
-    pmaddwd         m1, [vvc_pw_m83_m36]        ; z3
+    pmaddwd         m1, m0, [vvc_pw_64_m64]     ; z1
+    pmaddwd         m5, m4, [vvc_pw_m83_m36]    ; z3
+    pmaddwd         m0, [vvc_pw_64_64]          ; z0
+    pmaddwd         m4, [vvc_pw_m36_83]         ; z2
 
-    SUMSUB_BADC     d, 1, 2, 3, 0, 4
-
-    SWAP            0, 2, 3, 1
+    paddd           m3, m0, m5
+    paddd           m2, m1, m4
+    psubd           m0, m5
+    psubd           m1, m4
 %endmacro
 
 cglobal vvc_inv_dct2_dct2_4x4_10, 4, 4, 5, dst, coeff, nzw, log2_transform_range
@@ -82,8 +81,10 @@ cglobal vvc_inv_dct2_dct2_4x4_10, 4, 4, 5, dst, coeff, nzw, log2_transform_range
     packssdw        m1, m2, m3
 
 .transpose:
-    SBUTTERFLY      wd, 0, 1, 2
-    SBUTTERFLY      wd, 0, 1, 2
+    punpckhwd       m2, m0, m1
+    punpcklwd       m0, m1
+    punpckhwd       m1, m0, m2
+    punpcklwd       m0, m2
 
 .pass2:
     IDCT2_4
