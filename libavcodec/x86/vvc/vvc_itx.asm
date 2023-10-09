@@ -49,21 +49,6 @@ SECTION .text
 
 INIT_XMM avx2
 
-%macro IDCT2_4 0
-    punpckhwd       m4, m0, m1
-    punpcklwd       m0, m1
-
-    pmaddwd         m1, m0, [vvc_pw_64_m64]     ; z1
-    pmaddwd         m5, m4, [vvc_pw_m83_m36]    ; z3
-    pmaddwd         m0, [vvc_pw_64_64]          ; z0
-    pmaddwd         m4, [vvc_pw_m36_83]         ; z2
-
-    paddd           m3, m0, m5
-    paddd           m2, m1, m4
-    psubd           m0, m5
-    psubd           m1, m4
-%endmacro
-
 cglobal vvc_inv_dct2_dct2_4x4_10, 4, 4, 5, dst, coeff, nzw, log2_transform_range
     mova            m0, [coeffq]
     mova            m1, [coeffq + 16]
@@ -72,7 +57,7 @@ cglobal vvc_inv_dct2_dct2_4x4_10, 4, 4, 5, dst, coeff, nzw, log2_transform_range
     packssdw        m0, m1
     packssdw        m1, m2, m3
 
-    IDCT2_4
+    call            .main
 
 .scale_clip:
     REPX            {paddd x, [vvc_pd_64]}, m0, m1, m2, m3
@@ -87,7 +72,7 @@ cglobal vvc_inv_dct2_dct2_4x4_10, 4, 4, 5, dst, coeff, nzw, log2_transform_range
     punpcklwd       m0, m2
 
 .pass2:
-    IDCT2_4
+    call            .main
 
 .scale:
     REPX            {paddd x, [vvc_pd_512]}, m0, m1, m2, m3
@@ -97,5 +82,22 @@ cglobal vvc_inv_dct2_dct2_4x4_10, 4, 4, 5, dst, coeff, nzw, log2_transform_range
     mova            [dstq + 16], m1
     mova            [dstq + 32], m2
     mova            [dstq + 48], m3
+
+    RET
+
+ALIGN function_align
+cglobal_label .main
+    punpckhwd       m4, m0, m1
+    punpcklwd       m0, m1
+
+    pmaddwd         m1, m0, [vvc_pw_64_m64]     ; z1
+    pmaddwd         m5, m4, [vvc_pw_m83_m36]    ; z3
+    pmaddwd         m0, [vvc_pw_64_64]          ; z0
+    pmaddwd         m4, [vvc_pw_m36_83]         ; z2
+
+    paddd           m3, m0, m5
+    paddd           m2, m1, m4
+    psubd           m0, m5
+    psubd           m1, m4
 
     RET
