@@ -201,9 +201,11 @@ AVG_FUNCS(16, 12, avx2)
     c->inter.w_avg  = bf(w_avg, bd, opt);                               \
 } while (0)
 
-#define ITX_COMMON_SIZES(TYPE_H, type_h, TYPE_V, type_v, bitd, opt)
+#define ITX_COMMON_SIZES(TYPE_H, type_h, TYPE_V, type_v, bitd, opt)             \
+    ITX(TYPE_H, type_h, TYPE_V, type_v, 4, 4, bitd, opt)
 
-#define ITX_ALL_VARIANTS(bitd, opt)
+#define ITX_ALL_VARIANTS(bitd, opt)                                             \
+    ITX_COMMON_SIZES(DCT2, dct2, DCT2, dct2, bitd, opt)
 
 #define ITX_NAME(type_h, type_v, width, height, bitd, opt)                      \
     ff_vvc_inv_##type_h##_##type_v##_##width##x##height##_##bitd##_##opt
@@ -212,7 +214,6 @@ AVG_FUNCS(16, 12, avx2)
 void ITX_NAME(type_h, type_v, width, height, bitd, opt)(                        \
     int *dst, const int *coeffs, int nzw, int log2_transform_range);
 
-ITX_ALL_VARIANTS(8, avx2);
 ITX_ALL_VARIANTS(10, avx2);
 
 #undef ITX
@@ -233,7 +234,6 @@ void ff_vvc_dsp_init_x86(VVCDSPContext *const c, const int bd)
                 ALF_INIT(8);
                 PUT_VVC_LUMA_INIT(8, avx2);
                 AVG_INIT(8, avx2);
-                ITX_INIT(8, avx2);
                 c->sao.band_filter[0] = ff_vvc_sao_band_filter_8_8_avx2;
                 c->sao.band_filter[1] = ff_vvc_sao_band_filter_16_8_avx2;
                 break;
