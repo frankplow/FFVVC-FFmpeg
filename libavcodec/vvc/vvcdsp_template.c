@@ -39,8 +39,7 @@ static void FUNC(add_residual)(uint8_t *_dst, const int32_t *res,
 
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            dst[x] = av_clip_pixel(dst[x] + *res);
-            res++;
+            dst[x] = av_clip_pixel(dst[x] + res[x * h + y]);
         }
         dst += stride;
     }
@@ -55,9 +54,8 @@ static void FUNC(add_residual_joint)(uint8_t *_dst, const int32_t *res,
 
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            const int32_t r = ((*res) * c_sign) >> shift;
+            const int32_t r = ((res[x * h + y]) * c_sign) >> shift;
             dst[x] = av_clip_pixel(dst[x] + r);
-            res++;
         }
         dst += stride;
     }
@@ -211,7 +209,7 @@ static void FUNC(inv_##type_h##_##type_v##_##width##x##height)(int32_t *dst,    
     scale_clip(temp, nzw, width, height, 7, log2_transform_range);              \
                                                                                 \
     for (int y = 0; y < height; y++)                                            \
-        ff_vvc_inv_##type_h##_##width(dst + y * width, 1, temp + y * width, 1); \
+        ff_vvc_inv_##type_h##_##width(dst + y, height, temp + y * width, 1);    \
                                                                                 \
     scale(dst, dst, width, height, 5 + log2_transform_range - BIT_DEPTH);       \
 }

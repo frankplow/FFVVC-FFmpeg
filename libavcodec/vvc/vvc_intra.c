@@ -489,7 +489,7 @@ static void itransform(VVCLocalContext *lc, TransformUnit *tu, const int tu_idx,
                 memcpy(temp, tb->coeffs, w * h * sizeof(*tb->coeffs));
                 for (int y = 0; y < h; ++y) {
                     for (int x = 0; x < w; ++x) {
-                        tb->coeffs[y * w + x] = temp[y * w + x];
+                        tb->coeffs[x * h + y] = temp[y * w + x];
                     }
                 }
             }
