@@ -202,7 +202,8 @@ AVG_FUNCS(16, 12, avx2)
 } while (0)
 
 #define ITX_COMMON_SIZES(TYPE_H, type_h, TYPE_V, type_v, bitd, opt)             \
-    ITX(TYPE_H, type_h, TYPE_V, type_v, 4, 4, bitd, opt)
+    ITX(TYPE_H, type_h, TYPE_V, type_v, 4, 4, bitd, opt)                        \
+    ITX(TYPE_H, type_h, TYPE_V, type_v, 8, 8, bitd, opt)
 
 #define ITX_ALL_VARIANTS(bitd, opt)                                             \
     ITX_COMMON_SIZES(DCT2, dct2, DCT2, dct2, bitd, opt)
