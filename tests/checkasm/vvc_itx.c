@@ -81,13 +81,16 @@ const int itx_size[N_TX_TYPE] = {
     32,
 };
 
-static void check_itx(VVCDSPContext h, int bit_depth)
+static void check_itx(VVCDSPContext h, int bit_depth, int extended_precision_flag)
 {
-    const int log2_transform_range = 15;
     LOCAL_ALIGNED_32(int, ref_dst, [BUF_SIZE]);
     LOCAL_ALIGNED_32(int, new_dst, [BUF_SIZE]);
     LOCAL_ALIGNED_32(int, ref_src, [BUF_SIZE]);
     LOCAL_ALIGNED_32(int, new_src, [BUF_SIZE]);
+
+    const int log2_transform_range = extended_precision_flag ? FFMAX(15, FFMIN(20, bit_depth + 6)) : 15;
+    const int32_t coeff_min = -(1 << log2_transform_range);
+    const int32_t coeff_max = (1 << log2_transform_range) - 1;
 
     for (enum TxType trh = DCT2_1; trh < N_TX_TYPE; ++trh) {
         const int width = itx_size[trh];
@@ -96,7 +99,7 @@ static void check_itx(VVCDSPContext h, int bit_depth)
 
             declare_func_emms(AV_CPU_FLAG_MMX, void, int *dst, const int *src, int nzw, int log2_transform_range);
 
-            randomize_buffers(ref_src, new_src, BUF_SIZE, -(1 << (bit_depth - 1)), 1 << (bit_depth - 1) - 1);
+            randomize_buffers(ref_src, new_src, BUF_SIZE, coeff_min, coeff_max);
             memset(ref_dst, 0, BUF_SIZE);
             memset(new_dst, 0, BUF_SIZE);
 
@@ -120,8 +123,8 @@ void checkasm_check_vvc_itx(void)
 {
     VVCDSPContext h;
     ff_vvc_dsp_init(&h, 8);
-    check_itx(h, 8);
+    check_itx(h, 8, 0);
     ff_vvc_dsp_init(&h, 10);
-    check_itx(h, 10);
+    check_itx(h, 10, 0);
     report("idct2");
 }
