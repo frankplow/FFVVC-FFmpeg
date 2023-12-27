@@ -128,6 +128,13 @@ cglobal_label .main
 
 ; @TODO: Refactor this macro to have a nicer calling convention.
 %macro IDCT2_8 1 ; width
+    ; m0 and m1 contain even rows
+    ; m12 and m13 contain odd rows
+    packssdw        m0, m2
+    packssdw        m12, m1, m5
+    packssdw        m1, m4, m6
+    packssdw        m13, m3, m7
+
     call            m(vvc_inv_dct2_dct2_%1x4_10).main
 
     punpckhwd       m11, m12, m13
@@ -193,12 +200,6 @@ cglobal vvc_inv_dct2_dct2_4x8_10, 4, 4, 12, dst, coeff, nzw, log2_transform_rang
     RET
 
 .pass1:
-    ; m0 and m1 contain even rows
-    ; m12 and m13 contain odd rows
-    packssdw        m0, m2
-    packssdw        m12, m1, m5
-    packssdw        m1, m4, m6
-    packssdw        m13, m3, m7
 
 ALIGN function_align
 cglobal_label .main
@@ -256,32 +257,36 @@ cglobal vvc_inv_dct2_dct2_8x8_10, 4, 4, 16, dst, coeff, nzw, log2_transform_rang
     call            .pass1
 
 .scale_clip:
-    mova            m8, [vvc_deint]
     REPX            {paddd x, [vvc_pd_64]}, m0, m1, m2, m3, m4, m5, m6, m7
     REPX            {psrad x, 7}, m0, m1, m2, m3, m4, m5, m6, m7
-    REPX            {vpermd x, m8, x}, m0, m1, m2, m3, m4, m5, m6, m7
-    packssdw        m0, m4
-    packssdw        m4, m2, m6
-    packssdw        m2, m1, m5
-    packssdw        m3, m7
 
 .transpose:
-    REPX            {vpermq x, x, q3120}, m0, m4, m2, m3
+    punpckhdq       m8, m0, m1
+    punpckldq       m0, m0, m1
+    punpckhdq       m9, m2, m3
+    punpckldq       m1, m2, m3
+    punpckhdq       m10, m4, m5
+    punpckldq       m2, m4, m5
+    punpckhdq       m11, m6, m7
+    punpckldq       m3, m6, m7
 
-    punpckhqdq       m5, m4, m3
-    punpcklqdq       m1, m4, m3
-    punpckhqdq       m4, m0, m2
-    punpcklqdq       m0, m2
+    punpckhqdq      m5, m0, m1
+    punpcklqdq      m0, m0, m1
+    punpckhqdq      m4, m8, m9
+    punpcklqdq      m1, m8, m9
+    punpckhqdq      m12, m2, m3
+    punpcklqdq      m8, m2, m3
+    punpckhqdq      m13, m10, m11
+    punpcklqdq      m9, m10, m11
 
-    punpckhwd        m2, m0, m1
-    punpcklwd        m0, m1
-    punpckhwd        m8, m4, m5
-    punpcklwd        m12, m4, m5
-
-    punpckhwd        m1, m0, m2
-    punpcklwd        m0, m2
-    punpckhwd        m13, m12, m8
-    punpcklwd        m12, m8
+    vperm2i128      m2, m1, m9, 0x20
+    vperm2i128      m6, m1, m9, 0x31
+    vperm2i128      m1, m5, m12, 0x20
+    vperm2i128      m5, m5, m12, 0x31
+    vperm2i128      m7, m4, m13, 0x31
+    vperm2i128      m3, m4, m13, 0x20
+    vperm2i128      m4, m0, m8, 0x31
+    vperm2i128      m0, m0, m8, 0x20
 
 .pass2:
     call            .main
@@ -295,11 +300,6 @@ cglobal vvc_inv_dct2_dct2_8x8_10, 4, 4, 16, dst, coeff, nzw, log2_transform_rang
     RET
 
 .pass1:
-    packssdw        m0, m2
-    packssdw        m12, m1, m5
-    packssdw        m1, m4, m6
-    packssdw        m13, m3, m7
-
 ALIGN function_align
 cglobal_label .main
     IDCT2_8         8
