@@ -1130,6 +1130,8 @@ static int FUNC(sps)(CodedBitstreamContext *ctx, RWContext *rw,
 
     flag(sps_subpic_info_present_flag);
     if (current->sps_subpic_info_present_flag) {
+        if (current->sps_res_change_in_clvs_allowed_flag)
+            return AVERROR_INVALIDDATA;
         ue(sps_num_subpics_minus1, 0, VVC_MAX_SLICES - 1);
         if (current->sps_num_subpics_minus1 > 0) {
             flag(sps_independent_subpics_flag);
@@ -1559,6 +1561,8 @@ static int FUNC(sps)(CodedBitstreamContext *ctx, RWContext *rw,
     if (current->sps_virtual_boundaries_enabled_flag) {
         flag(sps_virtual_boundaries_present_flag);
         if (current->sps_virtual_boundaries_present_flag) {
+            if (current->sps_res_change_in_clvs_allowed_flag)
+                return AVERROR_INVALIDDATA;
             ue(sps_num_ver_virtual_boundaries,
                0, current->sps_pic_width_max_in_luma_samples <= 8 ? 0 : 3);
             for (i = 0; i < current->sps_num_ver_virtual_boundaries; i++)
