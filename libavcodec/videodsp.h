@@ -43,8 +43,6 @@ typedef struct VideoDSPContext {
      * the border samples.
      *
      * @param dst destination buffer
-     * @param dst_stride number of bytes between 2 vertically adjacent samples
-     *                   in destination buffer
      * @param src source buffer
      * @param dst_linesize number of bytes between 2 vertically adjacent
      *                     samples in the destination buffer
