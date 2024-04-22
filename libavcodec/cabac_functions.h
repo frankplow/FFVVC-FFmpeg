@@ -32,6 +32,7 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/intmath.h"
+#include "libavutil/macros.h"
 #include "cabac.h"
 #include "config.h"
 
@@ -106,9 +107,11 @@ static void refill2(CABACContext *c){
 
     c->low += x<<i;
 #if !UNCHECKED_BITSTREAM_READER
-    if (c->bytestream < c->bytestream_end)
+    c->bytestream = FFMIN(c->bytestream + CABAC_BITS / 8,
+                          c->bytestream_end - (CABAC_BITS / 8) + 1);
+#else
+    c->bytestream += CABAC_BITS / 8;
 #endif
-        c->bytestream += CABAC_BITS/8;
 }
 #endif
 

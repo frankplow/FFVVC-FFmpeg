@@ -877,9 +877,11 @@ static void vvc_refill2(CABACContext* c) {
 
     c->low += x << i;
 #if !UNCHECKED_BITSTREAM_READER
-    if (c->bytestream < c->bytestream_end)
+    c->bytestream = FFMIN(c->bytestream + CABAC_BITS / 8,
+                          c->bytestream_end - (CABAC_BITS / 8) + 1);
+#else
+    c->bytestream += CABAC_BITS / 8;
 #endif
-        c->bytestream += CABAC_BITS / 8;
 }
 
 static int inline vvc_get_cabac(CABACContext *c, VVCCabacState* base, const int ctx)
