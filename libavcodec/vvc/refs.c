@@ -112,6 +112,7 @@ static FrameProgress *alloc_progress(void)
 
 static VVCFrame *alloc_frame(VVCContext *s, VVCFrameContext *fc)
 {
+    const VVCSPS *sps = fc->ps.sps;
     const VVCPPS *pps = fc->ps.pps;
     for (int i = 0; i < FF_ARRAY_ELEMS(fc->DPB); i++) {
         int ret;
@@ -142,6 +143,12 @@ static VVCFrame *alloc_frame(VVCContext *s, VVCFrameContext *fc)
         frame->progress = alloc_progress();
         if (!frame->progress)
             goto fail;
+
+        frame->scaling_win_left_offset = pps->r->pps_scaling_win_left_offset;
+        frame->scaling_win_right_offset = pps->r->pps_scaling_win_right_offset;
+        frame->scaling_win_top_offset = pps->r->pps_scaling_win_top_offset;
+        frame->scaling_win_bottom_offset = pps->r->pps_scaling_win_bottom_offset;
+        frame->num_subpics = sps->r->sps_num_subpics_minus1 + 1;
 
         return frame;
 fail:
@@ -438,6 +445,9 @@ int ff_vvc_slice_rpl(VVCContext *s, VVCFrameContext *fc, SliceContext *sc)
         rpl->nb_refs = 0;
         for (int i = 0, j = 0; i < rpls->num_ref_entries; i++) {
             int poc;
+            int curr_pic_scal_win_width, curr_pic_scal_win_height;
+            int ref_pic_scal_win_width, ref_pic_scal_win_height;
+            VVCFrame *ref;
             if (!rpls->inter_layer_ref_pic_flag[i]) {
                 int use_msb = 1;
                 int ref_flag;
@@ -460,6 +470,25 @@ int ff_vvc_slice_rpl(VVCContext *s, VVCFrameContext *fc, SliceContext *sc)
                 ret = AVERROR_PATCHWELCOME;
                 return ret;
             }
+
+            ref = rpl->ref[rpl->nb_refs - 1];
+            // @TODO: Use scaling windows rather than full frames.
+            rpl->ref_pic_scale[rpl->nb_refs - 1][0] =
+                    ((ref->frame->width << 14) + (pps->pps_pic_width_in_luma_samples >> 1))
+                  / pps->pps_pic_width_in_luma_samples;
+            rpl->ref_pic_scale[rpl->nb_refs - 1][1] =
+                    ((ref->frame->height << 14) + (pps->pps_pic_height_in_luma_samples >> 1))
+                  / pps->pps_pic_height_in_luma_samples;
+            // @TODO: Handle subpics
+            rpl->rpr_constraints_active_flag[rpl->nb_refs - 1] = (
+                pps->pps_pic_width_in_luma_samples != ref->frame->width ||
+                pps->pps_pic_height_in_luma_samples != ref->frame->height ||
+                pps->pps_scaling_win_left_offset != ref->scaling_win_left_offset ||
+                pps->pps_scaling_win_right_offset != ref->scaling_win_right_offset ||
+                pps->pps_scaling_win_top_offset != ref->scaling_win_top_offset ||
+                pps->pps_scaling_win_bottom_offset != ref->scaling_win_bottom_offset // ||
+                /* sps->r->sps_num_subpics_minus1 + 1 != ref->num_subpics */
+            );
         }
         if ((!rsh->sh_collocated_from_l0_flag) == lx &&
             rsh->sh_collocated_ref_idx < rpl->nb_refs)

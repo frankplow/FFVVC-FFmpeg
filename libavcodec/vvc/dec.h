@@ -47,6 +47,8 @@ typedef struct RefPicList {
     int list[VVC_MAX_REF_ENTRIES];
     int isLongTerm[VVC_MAX_REF_ENTRIES];
     int nb_refs;
+    int ref_pic_scale[VVC_MAX_REF_ENTRIES][2];
+    int rpr_constraints_active_flag[VVC_MAX_REF_ENTRIES];
 } RefPicList;
 
 typedef struct RefPicListTab {
@@ -78,6 +80,12 @@ typedef struct VVCFrame {
      * A combination of VVC_FRAME_FLAG_*
      */
     uint8_t flags;
+
+    unsigned int scaling_win_left_offset;
+    unsigned int scaling_win_right_offset;
+    unsigned int scaling_win_top_offset;
+    unsigned int scaling_win_bottom_offset;
+    unsigned int num_subpics;
 } VVCFrame;
 
 typedef struct SliceContext {
