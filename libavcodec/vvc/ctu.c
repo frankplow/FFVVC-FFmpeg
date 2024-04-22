@@ -1706,8 +1706,8 @@ static void derive_dmvr_bdof_flag(const VVCLocalContext *lc, PredictionUnit *pu)
         !w->weight_flag[L0][LUMA][mi->ref_idx[L0]] && !w->weight_flag[L1][LUMA][mi->ref_idx[L1]] &&
         !w->weight_flag[L0][CHROMA][mi->ref_idx[L0]] && !w->weight_flag[L1][CHROMA][mi->ref_idx[L1]] &&
         cu->cb_width >= 8 && cu->cb_height >= 8 &&
-        (cu->cb_width * cu->cb_height >= 128)) {
-        // fixme: for RprConstraintsActiveFlag
+        (cu->cb_width * cu->cb_height >= 128) &&
+        !rpl0->rpr_constraints_active_flag[ref_idx[L0]] && !rpl1->rpr_constraints_active_flag[ref_idx[L1]]) {
         if (!ph->r->ph_bdof_disabled_flag &&
             mi->motion_model_idc == MOTION_TRANSLATION &&
             !pu->merge_subblock_flag &&

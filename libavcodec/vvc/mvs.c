@@ -287,6 +287,7 @@ static int derive_cb_prof_flag_lx(const VVCLocalContext *lc, const PredictionUni
 {
     const MotionInfo* mi    = &pu->mi;
     const Mv* cp_mv         = &mi->mv[lx][0];
+    const RefPicList *rpl   = lc->sc->rpl;
     if (lc->fc->ps.ph.r->ph_prof_disabled_flag || is_fallback)
         return 0;
     if (mi->motion_model_idc == MOTION_4_PARAMS_AFFINE) {
@@ -297,7 +298,8 @@ static int derive_cb_prof_flag_lx(const VVCLocalContext *lc, const PredictionUni
         if (IS_SAME_MV(cp_mv, cp_mv + 1) && IS_SAME_MV(cp_mv, cp_mv + 2))
             return 0;
     }
-    //fixme: RprConstraintsActiveFlag
+    if (rpl->rpr_constraints_active_flag[mi->ref_idx[lx]])
+        return 0;
     return 1;
 }
 
