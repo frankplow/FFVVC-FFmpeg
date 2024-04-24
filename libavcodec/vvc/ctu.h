@@ -350,6 +350,7 @@ typedef struct EntryPoint {
     int8_t qp_y;                                    ///< QpY
 
     int stat_coeff[VVC_MAX_SAMPLE_ARRAYS];          ///< StatCoeff
+    int predictor_palette_size[2];                  ///< PredictorPaletteSize
 
     VVCCabacState cabac_state[VVC_CONTEXTS];
     CABACContext cc;
@@ -482,5 +483,6 @@ void ff_vvc_decode_neighbour(VVCLocalContext *lc, int x_ctb, int y_ctb, int rx, 
 void ff_vvc_ctu_free_cus(CTU *ctu);
 int ff_vvc_get_qPy(const VVCFrameContext *fc, int xc, int yc);
 void ff_vvc_ep_init_stat_coeff(EntryPoint *ep, int bit_depth, int persistent_rice_adaptation_enabled_flag);
+void ff_vvc_ep_init_predictor_palette_size(EntryPoint *ep);
 
 #endif // AVCODEC_VVC_CTU_H

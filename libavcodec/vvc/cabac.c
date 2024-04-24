@@ -820,6 +820,7 @@ static void cabac_init_state(VVCLocalContext *lc)
     av_assert0(VVC_CONTEXTS == SYNTAX_ELEMENT_LAST);
 
     ff_vvc_ep_init_stat_coeff(lc->ep, sps->bit_depth, sps->r->sps_persistent_rice_adaptation_enabled_flag);
+    ff_vvc_ep_init_predictor_palette_size(lc->ep);
 
     if (rsh->sh_cabac_init_flag && !IS_I(rsh))
         init_type ^= 3;
@@ -2462,6 +2463,11 @@ int ff_vvc_mts_idx(VVCLocalContext *lc)
             return i;
     }
     return i;
+}
+
+int ff_vvc_palette_predictor_run(VVCLocalContext *lc)
+{
+    return kth_order_egk_decode(&lc->ep->cc, 0);
 }
 
 int ff_vvc_end_of_slice_flag_decode(VVCLocalContext *lc)

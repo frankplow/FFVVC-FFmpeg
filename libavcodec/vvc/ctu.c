@@ -948,6 +948,53 @@ static void derive_chroma_intra_pred_mode(VVCLocalContext *lc,
     }
 }
 
+static void palette_coding(VVCLocalContext *lc, const VVCTreeType tree_type)
+{
+    VVCFrameContext *fc                 = lc->fc;
+    const VVCSPS *sps                   = fc->ps.sps;
+    CodingUnit *cu                      = lc->cu;
+    EntryPoint *ep                      = lc->ep;
+    const int start_comp                = (tree_type == DUAL_TREE_CHROMA) ? 1 : 0;
+    const int num_comps                 = (tree_type == SINGLE_TREE)
+                                            ? (sps->chroma_format_idc == 0 ? 1 : 3)
+                                            : (tree_type == DUAL_TREE_CHROMA) ? 2 : 1;
+    const int max_palette               = (tree_type == SINGLE_TREE) ? 31 : 15;
+    const int max_preds                 = (tree_type == SINGLE_TREE) ? 63 : 31;
+    int pred_done                       = 0;
+    int num_pred                        = 0;
+    int signalled_entries               = 0;
+    int palette_predictor_entry_reuse_flags[VVC_MAX_PALETTE_PREDICTOR_SIZE];
+    /* int n_sub_width; */
+    /* int n_sub_height; */
+
+    /* if (c_idx > 0 && start_comp > 0) { */
+    /*     n_sub_width = cu->cb_width << hs; */
+    /*     n_sub_height = cu->cb_height << hs; */
+    /* } else { */
+    /*     n_sub_width = 1; */
+    /*     n_sub_height = 1; */
+    /* } */
+
+
+    for (size_t i = 0; i < ep->predictor_palette_size[start_comp] && !pred_done && num_pred < max_palette; i++) {
+        const int run = ff_vvc_palette_predictor_run(lc);
+        if (run != 1) {
+            if (run > 1)
+                i += run - 1;
+            palette_predictor_entry_reuse_flags[i] = 1;
+            num_pred++;
+        } else {
+            pred_done = 1;
+        }
+    }
+
+    if (num_pred < max_preds)
+        signalled_entries = ff_vvc_num_signalled_palette_entries(lc);
+    for (size_t c_idx = 0; c_idx < (start_comp + num_comps); c_idx++)
+        for (size_t i = 0; i < signalled_entries; i++
+            new_palette_entries[c_idx][i] = ff_vvc_new_palette_entry(lc);
+}
+
 static void intra_luma_pred_modes(VVCLocalContext *lc)
 {
     VVCFrameContext *fc             = lc->fc;
@@ -1049,7 +1096,6 @@ static PredMode pred_mode_decode(VVCLocalContext *lc,
 
     cu->skip_flag = 0;
     if (!IS_I(rsh) || sps->r->sps_ibc_enabled_flag) {
-        const int is_128 = cu->cb_width == 128 || cu->cb_height == 128;
         if (tree_type != DUAL_TREE_CHROMA &&
             ((!is_4x4 && mode_type != MODE_TYPE_INTRA) ||
             (sps->r->sps_ibc_enabled_flag && !is_128))) {
@@ -1809,16 +1855,18 @@ static int hls_coding_unit(VVCLocalContext *lc, int x0, int y0, int cb_width, in
         mode_type = MODE_TYPE_INTRA;
     cu->pred_mode = pred_mode_decode(lc, tree_type, mode_type);
 
-    if (cu->pred_mode == MODE_INTRA && sps->r->sps_palette_enabled_flag && !is_128 && !cu->skip_flag &&
-        mode_type != MODE_TYPE_INTER && ((cb_width * cb_height) >
-        (tree_type != DUAL_TREE_CHROMA ? 16 : (16 << hs << vs))) &&
+    if (cu->pred_mode == MODE_INTRA &&
+        sps->r->sps_palette_enabled_flag &&
+        !is_128 &&
+        !cu->skip_flag &&
+        mode_type != MODE_TYPE_INTER &&(cu->cb_width * cu->cb_height) > (tree_type != DUAL_TREE_CHROMA? 16 : (16 << hs << vs)) &&
         (mode_type != MODE_TYPE_INTRA || tree_type != DUAL_TREE_CHROMA)) {
         pred_mode_plt_flag = ff_vvc_pred_mode_plt_flag(lc);
-        if (pred_mode_plt_flag) {
-            avpriv_report_missing_feature(fc->log_ctx, "Palette");
-            return AVERROR_PATCHWELCOME;
-        }
+        if (pred_mode_plt_flag)
+            cu->pred_mode = MODE_PLT
     }
+
+
     if (cu->pred_mode == MODE_INTRA && sps->r->sps_act_enabled_flag && tree_type == SINGLE_TREE) {
         avpriv_report_missing_feature(fc->log_ctx, "Adaptive Color Transform");
         return AVERROR_PATCHWELCOME;
@@ -1826,8 +1874,7 @@ static int hls_coding_unit(VVCLocalContext *lc, int x0, int y0, int cb_width, in
     if (cu->pred_mode == MODE_INTRA || cu->pred_mode == MODE_PLT) {
         if (tree_type == SINGLE_TREE || tree_type == DUAL_TREE_LUMA) {
             if (pred_mode_plt_flag) {
-                avpriv_report_missing_feature(fc->log_ctx, "Palette");
-                return AVERROR_PATCHWELCOME;
+                palette_coding(lc, tree_type);
             } else {
                 intra_luma_pred_modes(lc);
             }
@@ -1835,8 +1882,7 @@ static int hls_coding_unit(VVCLocalContext *lc, int x0, int y0, int cb_width, in
         }
         if ((tree_type == SINGLE_TREE || tree_type == DUAL_TREE_CHROMA) && sps->r->sps_chroma_format_idc) {
             if (pred_mode_plt_flag && tree_type == DUAL_TREE_CHROMA) {
-                avpriv_report_missing_feature(fc->log_ctx, "Palette");
-                return AVERROR_PATCHWELCOME;
+                palette_coding(lc, tree_type);
             } else if (!pred_mode_plt_flag) {
                 if (!cu->act_enabled_flag)
                     intra_chroma_pred_modes(lc);
@@ -2554,4 +2600,9 @@ void ff_vvc_ep_init_stat_coeff(EntryPoint *ep,
         ep->stat_coeff[i] =
             persistent_rice_adaptation_enabled_flag ? 2 * (av_log2(bit_depth - 10)) : 0;
     }
+}
+
+void ff_vvc_ep_init_predictor_palette_size(EntryPoint *ep)
+{
+    ep->predictor_palette_size[0] = ep->predictor_palette_size[1] = 0;
 }
