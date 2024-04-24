@@ -89,6 +89,12 @@ typedef struct VVCInterDSPContext {
     int (*sad)(const int16_t *src0, const int16_t *src1, int dx, int dy, int block_w, int block_h);
     void (*dmvr[2][2])(int16_t *dst, const uint8_t *src, ptrdiff_t src_stride, int height,
         intptr_t mx, intptr_t my, int width);
+    void (*emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
+        ptrdiff_t dst_stride_y, ptrdiff_t src_stride_y,
+        ptrdiff_t src_step_x, ptrdiff_t src_step_y,
+        int block_w, int block_h,
+        int src_x, int src_y,
+        int w, int h);
 } VVCInterDSPContext;
 
 struct VVCLocalContext;

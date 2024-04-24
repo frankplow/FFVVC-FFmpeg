@@ -412,6 +412,99 @@ static void FUNC(dmvr_hv)(int16_t *dst, const uint8_t *_src, const ptrdiff_t _sr
     }
 }
 
+static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
+                                   ptrdiff_t dst_stride,
+                                   ptrdiff_t src_stride,
+                                   ptrdiff_t src_step_x,
+                                   ptrdiff_t src_step_y,
+                                   int block_w, int block_h,
+                                   int src_x, int src_y, int w, int h)
+{
+    int x, y;
+    int start_y, start_x, end_y, end_x;
+
+    if (!w || !h)
+        return;
+
+    av_assert2(block_w * sizeof(pixel) <= FFABS(dst_stride));
+
+    if (src_y >= h) {
+        src -= src_y * src_stride;
+        src += (h - 1) * src_stride;
+        src_y = h - 1;
+    } else if (src_y <= -block_h) {
+        src -= src_y * src_stride;
+        src += (1 - block_h) * src_stride;
+        src_y = 1 - block_h;
+    }
+    if (src_x >= w) {
+        // The subtracted expression has an unsigned type and must thus not be negative
+        src  -= (1 + src_x - w) * sizeof(pixel);
+        src_x = w - 1;
+    } else if (src_x <= -block_w) {
+        src  += (1 - block_w - src_x) * sizeof(pixel);
+        src_x = 1 - block_w;
+    }
+
+    start_y = FFMAX(0, -src_y);
+    start_x = FFMAX(0, -src_x);
+    end_y = FFMIN(block_h, h-src_y);
+    end_x = FFMIN(block_w, w-src_x);
+    av_assert2(start_y < end_y && block_h);
+    av_assert2(start_x < end_x && block_w);
+
+    w    = end_x - start_x;
+    src += start_y * src_stride + start_x * (ptrdiff_t)sizeof(pixel);
+    dst += start_x * sizeof(pixel);
+
+    // top
+    for (y = 0; y < start_y; y++) {
+        pixel *dstp = (pixel *) dst;
+        pixel *srcp = (pixel *) src;
+        for (int dx = 0; dx < w; dx++)
+            dstp[dx] = srcp[(dx * src_step_x + 32) >> 10];
+        dst += dst_stride;
+    }
+
+    // copy existing part
+    for (; y < end_y; y++) {
+        pixel *dstp = (pixel *) dst;
+        pixel *srcp = (pixel *) src;
+        for (int dx = 0; dx < w; dx++)
+            dstp[dx] = srcp[(dx * src_step_x + 32) >> 10];
+        // @FIXME: This isn't quite right.  In the long-term src will
+        // have to stay unmodified and offsets calculated at each step.
+        src += src_stride * ((src_step_y + 32) >> 10);
+        dst += dst_stride;
+    }
+
+    // bottom
+    src -= src_stride;
+    for (; y < block_h; y++) {
+        pixel *dstp = (pixel *) dst;
+        pixel *srcp = (pixel *) src;
+        for (int dx = 0; dx < w; dx++)
+            dstp[dx] = srcp[(dx * src_step_x + 32) >> 10];
+        dst += dst_stride;
+    }
+
+    dst -= block_h * dst_stride + start_x * (ptrdiff_t)sizeof(pixel);
+    while (block_h--) {
+        pixel *dstp = (pixel *) dst;
+
+        // left
+        for(x = 0; x < start_x; x++) {
+            dstp[x] = dstp[start_x];
+        }
+
+        // right
+        for (x = end_x; x < block_w; x++) {
+            dstp[x] = dstp[end_x - 1];
+        }
+        dst += dst_stride;
+    }
+}
+
 #define PEL_FUNC(dst, C, idx1, idx2, a)                                         \
     do {                                                                        \
         for (int w = 0; w < 7; w++)                                             \
@@ -459,6 +552,7 @@ static void FUNC(ff_vvc_inter_dsp_init)(VVCInterDSPContext *const inter)
     inter->apply_bdof           = FUNC(apply_bdof);
     inter->prof_grad_filter     = FUNC(prof_grad_filter);
     inter->sad                  = vvc_sad;
+    inter->emulated_edge_mc     = FUNC(emulated_edge_mc);
 }
 
 #undef FUNCS

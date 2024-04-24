@@ -647,7 +647,6 @@ static int frame_context_setup(VVCFrameContext *fc, VVCContext *s)
     if (ret < 0)
         return ret;
     ff_vvc_dsp_init(&fc->vvcdsp, fc->ps.sps->bit_depth);
-    ff_videodsp_init(&fc->vdsp, fc->ps.sps->bit_depth);
     return 0;
 }
 

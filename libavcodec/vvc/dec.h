@@ -115,7 +115,6 @@ typedef struct VVCFrameContext {
     VVCFrame *ref;
 
     VVCDSPContext vvcdsp;
-    VideoDSPContext vdsp;
 
     struct VVCFrameThread *ft;
 
