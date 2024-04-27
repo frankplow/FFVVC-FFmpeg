@@ -45,17 +45,17 @@ enum TxSize {
 };
 
 typedef struct VVCInterDSPContext {
-    void (*put[2 /* luma, chroma */][7 /* log2(width) - 1 */][2 /* int, frac */][2 /* int, frac */])(
+    void (*put[2 /* luma, chroma */][7 /* log2(width) - 1 */][3 /* int, frac, frac+step */][3 /* int, frac, frac+step */])(
         int16_t *dst, const uint8_t *src, ptrdiff_t src_stride, int height,
-        const int8_t *hf, const int8_t *vf, int width);
+        const int8_t *hf, const int8_t *vf, int mx, int my, int mx_step, int my_step, int width);
 
-    void (*put_uni[2 /* luma, chroma */][7 /* log2(width) - 1 */][2 /* int, frac */][2 /* int, frac */])(
+    void (*put_uni[2 /* luma, chroma */][7 /* log2(width) - 1 */][3 /* int, frac, frac+step */][3 /* int, frac, frac+step */])(
         uint8_t *dst, ptrdiff_t dst_stride, const uint8_t *src, ptrdiff_t src_stride, int height,
-        const int8_t *hf, const int8_t *vf, int width);
+        const int8_t *hf, const int8_t *vf, int mx, int my, int mx_step, int my_step, int width);
 
-    void (*put_uni_w[2 /* luma, chroma */][7 /* log2(width) - 1 */][2 /* int, frac */][2 /* int, frac */])(
+    void (*put_uni_w[2 /* luma, chroma */][7 /* log2(width) - 1 */][3 /* int, frac, frac+step */][3 /* int, frac, frac+step */])(
         uint8_t *dst, ptrdiff_t dst_stride, const uint8_t *src, ptrdiff_t src_stride, int height,
-        int denom, int wx, int ox, const int8_t *hf, const int8_t *vf, int width);
+        int denom, int wx, int ox, const int8_t *hf, const int8_t *vf, int mx, int my, int mx_step, int my_step, int width);
 
     void (*avg)(uint8_t *dst, ptrdiff_t dst_stride,
         const int16_t *src0, const int16_t *src1, int width, int height);
@@ -89,12 +89,13 @@ typedef struct VVCInterDSPContext {
     int (*sad)(const int16_t *src0, const int16_t *src1, int dx, int dy, int block_w, int block_h);
     void (*dmvr[2][2])(int16_t *dst, const uint8_t *src, ptrdiff_t src_stride, int height,
         intptr_t mx, intptr_t my, int width);
+    // @TODO: Make this an array where one element is (a shim to) the standard emulated_edge_mc.  This can then be used in the case src_step_x = src_step_y = 0, s.t. assembly optimisations are still used for typical blocks.
     void (*emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
         ptrdiff_t dst_stride_y, ptrdiff_t src_stride_y,
         ptrdiff_t src_step_x, ptrdiff_t src_step_y,
         int block_w, int block_h,
         int src_x, int src_y,
-        int w, int h);
+        int w, int h, int prec_log2);
 } VVCInterDSPContext;
 
 struct VVCLocalContext;

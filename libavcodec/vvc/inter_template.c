@@ -412,13 +412,18 @@ static void FUNC(dmvr_hv)(int16_t *dst, const uint8_t *_src, const ptrdiff_t _sr
     }
 }
 
+// @TODO: Account for fact subblock x/y may not be an integer.
+//        Will probably require taking *src as buffer origin, then 
+//        having src_x/src_y be offsets in subpels then offset +
+//        rounding at the last minute.
 static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
                                    ptrdiff_t dst_stride,
                                    ptrdiff_t src_stride,
                                    ptrdiff_t src_step_x,
                                    ptrdiff_t src_step_y,
                                    int block_w, int block_h,
-                                   int src_x, int src_y, int w, int h)
+                                   int src_x, int src_y, int w, int h,
+                                   int prec_log2)
 {
     int x, y;
     int start_y, start_x, end_y, end_x;
@@ -454,7 +459,8 @@ static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
     av_assert2(start_x < end_x && block_w);
 
     w    = end_x - start_x;
-    src += start_y * src_stride + start_x * (ptrdiff_t)sizeof(pixel);
+    src += start_y * src_stride * ((src_step_y + (1 << (9 - prec_log2))) >> 10) +
+        start_x * (ptrdiff_t)sizeof(pixel) * ((src_step_x + (1 << (9 - prec_log2))) >> 10);
     dst += start_x * sizeof(pixel);
 
     // top
@@ -462,7 +468,7 @@ static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
         pixel *dstp = (pixel *) dst;
         pixel *srcp = (pixel *) src;
         for (int dx = 0; dx < w; dx++)
-            dstp[dx] = srcp[(dx * src_step_x + 32) >> 10];
+            dstp[dx] = srcp[(dx * src_step_x + (1 << (9 - prec_log2))) >> 10];
         dst += dst_stride;
     }
 
@@ -470,11 +476,11 @@ static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
     for (; y < end_y; y++) {
         pixel *dstp = (pixel *) dst;
         pixel *srcp = (pixel *) src;
-        for (int dx = 0; dx < w; dx++)
-            dstp[dx] = srcp[(dx * src_step_x + 32) >> 10];
-        // @FIXME: This isn't quite right.  In the long-term src will
-        // have to stay unmodified and offsets calculated at each step.
-        src += src_stride * ((src_step_y + 32) >> 10);
+        const size_t iy = ((y - start_y) * src_step_y + (1 << (9 - prec_log2))) >> 10;
+        for (int dx = 0; dx < w; dx++) {
+            const size_t ix = (dx * src_step_x + (1 << (9 - prec_log2))) >> 10;
+            dstp[dx] = srcp[iy * src_stride / sizeof(pixel) + ix];
+        }
         dst += dst_stride;
     }
 
@@ -483,8 +489,11 @@ static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
     for (; y < block_h; y++) {
         pixel *dstp = (pixel *) dst;
         pixel *srcp = (pixel *) src;
-        for (int dx = 0; dx < w; dx++)
-            dstp[dx] = srcp[(dx * src_step_x + 32) >> 10];
+        const size_t iy = ((end_y - start_y) * src_step_y + (1 << (9 - prec_log2))) >> 10;
+        for (int dx = 0; dx < w; dx++) {
+            const size_t ix = (dx * src_step_x + (1 << (9 - prec_log2))) >> 10;
+            dstp[dx] = srcp[iy * src_stride / sizeof(pixel) + ix];
+        }
         dst += dst_stride;
     }
 
@@ -505,6 +514,246 @@ static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
     }
 }
 
+
+#undef NOSTEP_SHIM
+#define NOSTEP_SHIM(fn, taps)                                                   \
+static void FUNC(fn##_nostep)(int16_t *dst, const uint8_t *src,                 \
+    ptrdiff_t src_stride, int height, const int8_t *hf,                         \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)      \
+{                                                                               \
+    const int8_t *hfi = ((const int8_t (*)[taps]) hf)[mx];                      \
+    const int8_t *vfi = ((const int8_t (*)[taps]) vf)[my];                      \
+    av_assert2(mx_step == 0);                                                   \
+    av_assert2(my_step == 0);                                                   \
+    FUNC(fn)(dst, src, src_stride, height, hfi, vfi, width);                    \
+}
+
+NOSTEP_SHIM(put_pixels, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_luma_h, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_luma_v, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_luma_hv, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_chroma_h, VVC_INTER_CHROMA_TAPS)
+NOSTEP_SHIM(put_chroma_v, VVC_INTER_CHROMA_TAPS)
+NOSTEP_SHIM(put_chroma_hv, VVC_INTER_CHROMA_TAPS)
+
+#define STEP_SHIM_H(C, c)                                                       \
+static void FUNC(put_##c##_h_step)(int16_t *dst, const uint8_t *src,            \
+    ptrdiff_t src_stride, int height, const int8_t *hf,                         \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)      \
+{                                                                               \
+    for (int y = 0; y < height; y++) {                                          \
+        const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];  \
+        FUNC(put_##c##_h)(dst, src, src_stride, 1, hfi, vfi, width);            \
+        src += src_stride;                                                      \
+        dst += MAX_PB_SIZE;                                                     \
+        my = (my + my_step) % VVC_INTER_##C##_FACTS;                            \
+    }                                                                           \
+}
+
+STEP_SHIM_H(LUMA, luma)
+STEP_SHIM_H(CHROMA, chroma)
+
+#define STEP_SHIM_V(C, c)                                                       \
+static void FUNC(put_##c##_v_step)(int16_t *dst, const uint8_t *src,            \
+    ptrdiff_t src_stride, int height, const int8_t *hf,                         \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)      \
+{                                                                               \
+    for (int x = 0; x < width; x++) {                                           \
+        const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];  \
+        FUNC(put_##c##_v)(dst, src, src_stride, height, hfi, vfi, 1);           \
+        src += sizeof(pixel);                                                   \
+        dst += 1;                                                               \
+        mx = (mx + mx_step) % VVC_INTER_##C##_FACTS;                            \
+    }                                                                           \
+}
+
+STEP_SHIM_V(LUMA, luma)
+STEP_SHIM_V(CHROMA, chroma)
+
+#define STEP_SHIM_HV(C, c)                                                          \
+static void FUNC(put_##c##_hv_step)(int16_t *dst, const uint8_t *src,               \
+    ptrdiff_t src_stride, int height, const int8_t *hf,                             \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)          \
+{                                                                                   \
+    for (int y = 0; y < height; y++) {                                              \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];      \
+        for (int x = 0; x < width; x++) {                                           \
+            const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+            FUNC(put_##c##_hv)(dst + x, src + x * sizeof(pixel), src_stride, 1, hfi, vfi, 1); \
+            mx = (mx + mx_step) % VVC_INTER_##C##_FACTS;                            \
+        }                                                                           \
+        my = (my + my_step) % VVC_INTER_##C##_FACTS;                                \
+        src = src + src_stride;                                                     \
+        dst = dst + MAX_PB_SIZE;                                                    \
+    }                                                                               \
+}
+
+STEP_SHIM_HV(LUMA, luma)
+STEP_SHIM_HV(CHROMA, chroma)
+
+#undef NOSTEP_SHIM
+#define NOSTEP_SHIM(fn, taps)                                                   \
+static void FUNC(fn##_nostep)(uint8_t *dst, ptrdiff_t dst_stride,               \
+    const uint8_t *src, ptrdiff_t src_stride, int height, const int8_t *hf,     \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)      \
+{                                                                               \
+    const int8_t *hfi = ((const int8_t (*)[taps]) hf)[mx];                      \
+    const int8_t *vfi = ((const int8_t (*)[taps]) vf)[my];                      \
+    av_assert2(mx_step == 0);                                                   \
+    av_assert2(my_step == 0);                                                   \
+    FUNC(fn)(dst, dst_stride, src, src_stride, height, hfi, vfi, width);        \
+}
+
+NOSTEP_SHIM(put_uni_pixels, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_luma_h, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_luma_v, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_luma_hv, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_chroma_h, VVC_INTER_CHROMA_TAPS)
+NOSTEP_SHIM(put_uni_chroma_v, VVC_INTER_CHROMA_TAPS)
+NOSTEP_SHIM(put_uni_chroma_hv, VVC_INTER_CHROMA_TAPS)
+
+#define STEP_SHIM_UNI_H(C, c)                                                   \
+static void FUNC(put_uni_##c##_h_step)(uint8_t *dst, ptrdiff_t dst_stride,      \
+    const uint8_t *src, ptrdiff_t src_stride, int height, const int8_t *hf,     \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)      \
+{                                                                               \
+    for (int y = 0; y < height; y++) {                                          \
+        const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];  \
+        FUNC(put_uni_##c##_h)(dst, dst_stride, src, src_stride, 1, hfi, vfi, width);        \
+        src += src_stride;                                                      \
+        dst += dst_stride;                                                      \
+        my = (my + my_step) % VVC_INTER_##C##_FACTS;                            \
+    }                                                                           \
+}
+
+STEP_SHIM_UNI_H(LUMA, luma)
+STEP_SHIM_UNI_H(CHROMA, chroma)
+
+#define STEP_SHIM_UNI_V(C, c)                                                   \
+static void FUNC(put_uni_##c##_v_step)(uint8_t *dst, ptrdiff_t dst_stride,      \
+    const uint8_t *src, ptrdiff_t src_stride, int height, const int8_t *hf,     \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)      \
+{                                                                               \
+    for (int x = 0; x < width; x++) {                                           \
+        const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];  \
+        FUNC(put_uni_##c##_v)(dst, dst_stride, src, src_stride, height, hfi, vfi, 1);       \
+        src += sizeof(pixel);                                                   \
+        dst += sizeof(pixel);                                                   \
+        mx = (mx + mx_step) % VVC_INTER_##C##_FACTS;                            \
+    }                                                                           \
+}
+
+STEP_SHIM_UNI_V(LUMA, luma)
+STEP_SHIM_UNI_V(CHROMA, chroma)
+
+#define STEP_SHIM_UNI_HV(C, c)                                                      \
+static void FUNC(put_uni_##c##_hv_step)(uint8_t *dst, ptrdiff_t dst_stride,         \
+    const uint8_t *src, ptrdiff_t src_stride, int height, const int8_t *hf,         \
+    const int8_t *vf, int mx, int my, int mx_step, int my_step, int width)          \
+{                                                                                   \
+    for (int y = 0; y < height; y++) {                                              \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];      \
+        for (int x = 0; x < width; x++) {                                           \
+            const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+            FUNC(put_uni_##c##_hv)(dst + x * sizeof(pixel), dst_stride, src + x * sizeof(pixel), src_stride, 1, hfi, vfi, 1); \
+            mx = (mx + mx_step) % VVC_INTER_##C##_FACTS;                            \
+        }                                                                           \
+        my = (my + my_step) % VVC_INTER_##C##_FACTS;                                \
+        src = src + src_stride;                                                     \
+        dst = dst + dst_stride;                                                     \
+    }                                                                               \
+}
+
+STEP_SHIM_UNI_HV(LUMA, luma)
+STEP_SHIM_UNI_HV(CHROMA, chroma)
+
+#undef NOSTEP_SHIM
+#define NOSTEP_SHIM(fn, taps)                                                   \
+static void FUNC(fn##_nostep)(uint8_t *dst, ptrdiff_t dst_stride,               \
+    const uint8_t *src, ptrdiff_t src_stride, int height, int denom, int wx,    \
+    int ox, const int8_t *hf, const int8_t *vf, int mx, int my,                 \
+    int mx_step, int my_step, int width)                                        \
+{                                                                               \
+    const int8_t *hfi = ((const int8_t (*)[taps]) hf)[mx];                      \
+    const int8_t *vfi = ((const int8_t (*)[taps]) vf)[my];                      \
+    av_assert2(mx_step == 0);                                                   \
+    av_assert2(my_step == 0);                                                   \
+    FUNC(fn)(dst, dst_stride, src, src_stride, height, denom, wx, ox, hfi, vfi, width);  \
+}
+
+NOSTEP_SHIM(put_uni_w_pixels, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_luma_w_h, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_luma_w_v, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_luma_w_hv, VVC_INTER_LUMA_TAPS)
+NOSTEP_SHIM(put_uni_chroma_w_h, VVC_INTER_CHROMA_TAPS)
+NOSTEP_SHIM(put_uni_chroma_w_v, VVC_INTER_CHROMA_TAPS)
+NOSTEP_SHIM(put_uni_chroma_w_hv, VVC_INTER_CHROMA_TAPS)
+
+#define STEP_SHIM_UNI_W_H(C, c)                                                 \
+static void FUNC(put_uni_##c##_w_h_step)(uint8_t *dst, ptrdiff_t dst_stride,    \
+    const uint8_t *src, ptrdiff_t src_stride, int height, int denom, int wx,    \
+    int ox, const int8_t *hf, const int8_t *vf, int mx, int my, int mx_step,    \
+    int my_step, int width)                                                     \
+{                                                                               \
+    for (int y = 0; y < height; y++) {                                          \
+        const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];  \
+        FUNC(put_uni_##c##_w_h)(dst, dst_stride, src, src_stride, 1, denom, wx, ox, hfi, vfi, width);        \
+        src += src_stride;                                                      \
+        dst += dst_stride;                                                      \
+        my = (my + my_step) % VVC_INTER_##C##_FACTS;                            \
+    }                                                                           \
+}
+
+STEP_SHIM_UNI_W_H(LUMA, luma)
+STEP_SHIM_UNI_W_H(CHROMA, chroma)
+
+#define STEP_SHIM_UNI_W_V(C, c)                                                 \
+static void FUNC(put_uni_##c##_w_v_step)(uint8_t *dst, ptrdiff_t dst_stride,    \
+    const uint8_t *src, ptrdiff_t src_stride, int height, int denom, int wx,    \
+    int ox, const int8_t *hf, const int8_t *vf, int mx, int my, int mx_step,    \
+    int my_step, int width)                                                     \
+{                                                                               \
+    for (int x = 0; x < width; x++) {                                           \
+        const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];  \
+        FUNC(put_uni_##c##_w_v)(dst, dst_stride, src, src_stride, height, denom, wx, ox, hfi, vfi, 1);       \
+        src += sizeof(pixel);                                                   \
+        dst += sizeof(pixel);                                                   \
+        mx = (mx + mx_step) % VVC_INTER_##C##_FACTS;                            \
+    }                                                                           \
+}
+
+STEP_SHIM_UNI_W_V(LUMA, luma)
+STEP_SHIM_UNI_W_V(CHROMA, chroma)
+
+#define STEP_SHIM_UNI_W_HV(C, c)                                                    \
+static void FUNC(put_uni_##c##_w_hv_step)(uint8_t *dst, ptrdiff_t dst_stride,       \
+    const uint8_t *src, ptrdiff_t src_stride, int height, int denom, int wx,        \
+    int ox, const int8_t *hf, const int8_t *vf, int mx, int my, int mx_step,        \
+    int my_step, int width)                                                         \
+{                                                                                   \
+    for (int y = 0; y < height; y++) {                                              \
+        const int8_t *vfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) vf)[my];      \
+        for (int x = 0; x < width; x++) {                                           \
+            const int8_t *hfi = ((const int8_t (*)[VVC_INTER_##C##_TAPS]) hf)[mx];  \
+            FUNC(put_uni_##c##_w_hv)(dst + x * sizeof(pixel), dst_stride, src + x * sizeof(pixel), src_stride, 1, denom, wx, ox, hfi, vfi, 1); \
+            mx = (mx + mx_step) % VVC_INTER_##C##_FACTS;                            \
+        }                                                                           \
+        my = (my + my_step) % VVC_INTER_##C##_FACTS;                                \
+        src = src + src_stride;                                                     \
+        dst = dst + dst_stride;                                                     \
+    }                                                                               \
+}
+
+STEP_SHIM_UNI_W_HV(LUMA, luma)
+STEP_SHIM_UNI_W_HV(CHROMA, chroma)
+
+
 #define PEL_FUNC(dst, C, idx1, idx2, a)                                         \
     do {                                                                        \
         for (int w = 0; w < 7; w++)                                             \
@@ -512,20 +761,35 @@ static void FUNC(emulated_edge_mc)(uint8_t *dst, const uint8_t *src,
     } while (0)                                                                 \
 
 #define DIR_FUNCS(d, C, c)                                                      \
-        PEL_FUNC(put_##d, C, 0, 0, put_##d##_pixels);                           \
-        PEL_FUNC(put_##d, C, 0, 1, put_##d##_##c##_h);                          \
-        PEL_FUNC(put_##d, C, 1, 0, put_##d##_##c##_v);                          \
-        PEL_FUNC(put_##d, C, 1, 1, put_##d##_##c##_hv);                         \
-        PEL_FUNC(put_##d##_w, C, 0, 0, put_##d##_w_pixels);                     \
-        PEL_FUNC(put_##d##_w, C, 0, 1, put_##d##_##c##_w_h);                    \
-        PEL_FUNC(put_##d##_w, C, 1, 0, put_##d##_##c##_w_v);                    \
-        PEL_FUNC(put_##d##_w, C, 1, 1, put_##d##_##c##_w_hv);
+        PEL_FUNC(put_##d, C, 0, 0, put_##d##_pixels_nostep);                    \
+        PEL_FUNC(put_##d, C, 0, 1, put_##d##_##c##_h_nostep);                   \
+        PEL_FUNC(put_##d, C, 0, 2, put_##d##_##c##_h_step);                     \
+        PEL_FUNC(put_##d, C, 1, 0, put_##d##_##c##_v_nostep);                   \
+        PEL_FUNC(put_##d, C, 2, 0, put_##d##_##c##_v_step);                     \
+        PEL_FUNC(put_##d, C, 1, 1, put_##d##_##c##_hv_nostep);                  \
+        PEL_FUNC(put_##d, C, 1, 2, put_##d##_##c##_hv_step);                    \
+        PEL_FUNC(put_##d, C, 2, 1, put_##d##_##c##_hv_step);                    \
+        PEL_FUNC(put_##d, C, 2, 2, put_##d##_##c##_hv_step);                    \
+        PEL_FUNC(put_##d##_w, C, 0, 0, put_##d##_w_pixels_nostep);              \
+        PEL_FUNC(put_##d##_w, C, 0, 1, put_##d##_##c##_w_h_nostep);             \
+        PEL_FUNC(put_##d##_w, C, 0, 2, put_##d##_##c##_w_h_step);               \
+        PEL_FUNC(put_##d##_w, C, 1, 0, put_##d##_##c##_w_v_nostep);             \
+        PEL_FUNC(put_##d##_w, C, 2, 0, put_##d##_##c##_w_v_step);               \
+        PEL_FUNC(put_##d##_w, C, 1, 1, put_##d##_##c##_w_hv_nostep);            \
+        PEL_FUNC(put_##d##_w, C, 1, 2, put_##d##_##c##_w_hv_step);              \
+        PEL_FUNC(put_##d##_w, C, 2, 1, put_##d##_##c##_w_hv_step);              \
+        PEL_FUNC(put_##d##_w, C, 2, 2, put_##d##_##c##_w_hv_step);
 
 #define FUNCS(C, c)                                                             \
-        PEL_FUNC(put, C, 0, 0, put_pixels);                                     \
-        PEL_FUNC(put, C, 0, 1, put_##c##_h);                                    \
-        PEL_FUNC(put, C, 1, 0, put_##c##_v);                                    \
-        PEL_FUNC(put, C, 1, 1, put_##c##_hv);                                   \
+        PEL_FUNC(put, C, 0, 0, put_pixels_nostep);                              \
+        PEL_FUNC(put, C, 0, 1, put_##c##_h_nostep);                             \
+        PEL_FUNC(put, C, 0, 2, put_##c##_h_step);                               \
+        PEL_FUNC(put, C, 1, 0, put_##c##_v_nostep);                             \
+        PEL_FUNC(put, C, 2, 0, put_##c##_v_step);                               \
+        PEL_FUNC(put, C, 1, 1, put_##c##_hv_nostep);                            \
+        PEL_FUNC(put, C, 1, 2, put_##c##_hv_step);                              \
+        PEL_FUNC(put, C, 2, 1, put_##c##_hv_step);                              \
+        PEL_FUNC(put, C, 2, 2, put_##c##_hv_step);                              \
         DIR_FUNCS(uni, C, c);                                                   \
 
 static void FUNC(ff_vvc_inter_dsp_init)(VVCInterDSPContext *const inter)
