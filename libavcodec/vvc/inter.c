@@ -209,15 +209,54 @@ static int derive_weight(int *denom, int *w0, int *w1, int *o0, int *o1,
     return 1;
 }
 
-static void luma_mc(VVCLocalContext *lc, int16_t *dst, const AVFrame *ref, const Mv *mv,
+static int add_scaled_mv_luma(int off, int scale, int mv)
+{
+    off = ((off << 4) + mv) * scale;
+    off = (FFSIGN(off) * ((FFABS(off) + (1 << 7)) >> 8) + (1 << 5)) >> 6;
+    return off;
+}
+
+static void rpr_derive_luma(int *off, int *mv_step, int scale, int mv)
+{
+    const int src_step = ((scale + 8) >> 4);
+    *off = add_scaled_mv_luma(*off, scale, mv);
+    *mv_step  = ((src_step + 32) >> 6) & 15;
+}
+
+static int add_scaled_mv_chroma(int off, int scale, int mv)
+{
+    off = ((off << 5) + mv) * scale;
+    off = FFSIGN(off) * ((FFABS(off) + (1 << 8)) >> 9);
+    return off;
+}
+
+
+static void rpr_derive_chroma(int *off, int *mv_step, int scale, int mv)
+{
+    const int src_step = ((scale + 8) >> 4);
+    *off = add_scaled_mv_chroma(*off, scale, mv);
+    *mv_step  = ((src_step + 16) >> 5) & 15;
+}
+
+static void luma_mc(VVCLocalContext *lc, int16_t *dst, const AVFrame *ref, const MvField *mvf, int lx,
     int x_off, int y_off, const int block_w, const int block_h)
 {
     const VVCFrameContext *fc   = lc->fc;
+    const RefPicList *rpl       = lc->sc->rpl;
+    const Mv *mv                = mvf->mv + lx;
     const uint8_t *src          = ref->data[0];
     ptrdiff_t src_stride        = ref->linesize[0];
     const int idx               = av_log2(block_w) - 1;
+    const int scale_x           = rpl->ref_pic_scale[mvf->ref_idx[lx]][0];
+    const int scale_y           = rpl->ref_pic_scale[mvf->ref_idx[lx]][1];
     const int mx                = mv->x & 0xf;
     const int my                = mv->y & 0xf;
+    int x_sb                    = x_off;
+    int y_sb                    = y_off;
+    int mx_step, my_step;
+
+    rpr_derive_luma(&x_sb, &mx_step, scale_x, mv->x);
+    rpr_derive_luma(&y_sb, &my_step, scale_y, mv->y);
     const int8_t *hf            = ff_vvc_inter_luma_filters[0][mx];
     const int8_t *vf            = ff_vvc_inter_luma_filters[0][my];
 
@@ -230,17 +269,27 @@ static void luma_mc(VVCLocalContext *lc, int16_t *dst, const AVFrame *ref, const
     fc->vvcdsp.inter.put[LUMA][idx][!!my][!!mx](dst, src, src_stride, block_h, hf, vf, block_w);
 }
 
-static void chroma_mc(VVCLocalContext *lc, int16_t *dst, const AVFrame *ref, const Mv *mv,
+static void chroma_mc(VVCLocalContext *lc, int16_t *dst, const AVFrame *ref, const MvField *mvf, int lx,
     int x_off, int y_off, const int block_w, const int block_h, const int c_idx)
 {
     const VVCFrameContext *fc   = lc->fc;
+    const RefPicList *rpl       = lc->sc->rpl;
+    const Mv *mv                = mvf->mv + lx;
     const uint8_t *src          = ref->data[c_idx];
     ptrdiff_t src_stride        = ref->linesize[c_idx];
     int hs                      = fc->ps.sps->hshift[c_idx];
     int vs                      = fc->ps.sps->vshift[c_idx];
     const int idx               = av_log2(block_w) - 1;
+    const int scale_x           = rpl->ref_pic_scale[mvf->ref_idx[lx]][0];
+    const int scale_y           = rpl->ref_pic_scale[mvf->ref_idx[lx]][1];
     const intptr_t mx           = av_mod_uintp2(mv->x, 4 + hs) << (1 - hs);
     const intptr_t my           = av_mod_uintp2(mv->y, 4 + vs) << (1 - vs);
+    int x_sb                    = x_off;
+    int y_sb                    = y_off;
+    int mx_step, my_step;
+
+    rpr_derive_chroma(&x_sb, &mx_step, scale_x, mv->x);
+    rpr_derive_chroma(&y_sb, &my_step, scale_y, mv->y);
     const int8_t *hf            = ff_vvc_inter_chroma_filters[0][mx];
     const int8_t *vf            = ff_vvc_inter_chroma_filters[0][my];
 
@@ -259,14 +308,23 @@ static void luma_mc_uni(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst_s
     const VVCFrameContext *fc   = lc->fc;
     const int lx                = mvf->pred_flag - PF_L0;
     const Mv *mv                = mvf->mv + lx;
+    const RefPicList *rpl       = lc->sc->rpl;
     const uint8_t *src          = ref->data[0];
     ptrdiff_t src_stride        = ref->linesize[0];
+    const int scale_x           = rpl->ref_pic_scale[mvf->ref_idx[lx]][0];
+    const int scale_y           = rpl->ref_pic_scale[mvf->ref_idx[lx]][1];
     const int idx               = av_log2(block_w) - 1;
     const int mx                = mv->x & 0xf;
     const int my                = mv->y & 0xf;
+    int x_sb                    = x_off;
+    int y_sb                    = y_off;
     const int8_t *hf            = ff_vvc_inter_luma_filters[hf_idx][mx];
     const int8_t *vf            = ff_vvc_inter_luma_filters[vf_idx][my];
     int denom, wx, ox;
+    int mx_step, my_step;
+
+    rpr_derive_luma(&x_sb, &mx_step, scale_x, mv->x);
+    rpr_derive_luma(&y_sb, &my_step, scale_y, mv->y);
 
     x_off += mv->x >> 4;
     y_off += mv->y >> 4;
@@ -290,6 +348,7 @@ static void luma_mc_bi(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst_st
 {
     const VVCFrameContext *fc   = lc->fc;
     const PredictionUnit *pu    = &lc->cu->pu;
+    const RefPicList *rpl       = lc->sc->rpl;
     const int idx               = av_log2(block_w) - 1;
     const AVFrame *ref[]        = { ref0, ref1 };
     int16_t *tmp[]              = { lc->tmp + sb_bdof_flag * PROF_TEMP_OFFSET, lc->tmp1 + sb_bdof_flag * PROF_TEMP_OFFSET };
@@ -303,7 +362,15 @@ static void luma_mc_bi(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst_st
         const int ox            = x_off + (mv->x >> 4);
         const int oy            = y_off + (mv->y >> 4);
         ptrdiff_t src_stride    = ref[i]->linesize[0];
+        const int scale_x       = rpl->ref_pic_scale[mvf->ref_idx[i]][0];
+        const int scale_y       = rpl->ref_pic_scale[mvf->ref_idx[i]][1];
         const uint8_t *src      = ref[i]->data[0] + oy * src_stride + (ox * (1 << fc->ps.sps->pixel_shift));
+        int x_sb                = x_off;
+        int y_sb                = y_off;
+        int mx_step, my_step;
+
+        rpr_derive_luma(&x_sb, &mx_step, scale_x, mv->x);
+        rpr_derive_luma(&y_sb, &my_step, scale_y, mv->y);
         const int8_t *hf        = ff_vvc_inter_luma_filters[hf_idx][mx];
         const int8_t *vf        = ff_vvc_inter_luma_filters[vf_idx][my];
 
@@ -334,16 +401,25 @@ static void chroma_mc_uni(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst
     const int hf_idx, const int vf_idx)
 {
     const VVCFrameContext *fc   = lc->fc;
+    const RefPicList *rpl       = lc->sc->rpl;
     const int lx                = mvf->pred_flag - PF_L0;
     const int hs                = fc->ps.sps->hshift[1];
     const int vs                = fc->ps.sps->vshift[1];
     const int idx               = av_log2(block_w) - 1;
     const Mv *mv                = &mvf->mv[lx];
+    const int scale_x           = rpl->ref_pic_scale[mvf->ref_idx[lx]][0];
+    const int scale_y           = rpl->ref_pic_scale[mvf->ref_idx[lx]][1];
     const intptr_t mx           = av_mod_uintp2(mv->x, 4 + hs) << (1 - hs);
     const intptr_t my           = av_mod_uintp2(mv->y, 4 + vs) << (1 - vs);
+    int x_sb                = x_off;
+    int y_sb                = y_off;
     const int8_t *hf            = ff_vvc_inter_chroma_filters[hf_idx][mx];
     const int8_t *vf            = ff_vvc_inter_chroma_filters[vf_idx][my];
     int denom, wx, ox;
+    int mx_step, my_step;
+
+    rpr_derive_chroma(&x_sb, &mx_step, scale_x, mv->x);
+    rpr_derive_chroma(&y_sb, &my_step, scale_y, mv->y);
 
     x_off += mv->x >> (4 + hs);
     y_off += mv->y >> (4 + vs);
@@ -366,6 +442,7 @@ static void chroma_mc_bi(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst_
     const int hf_idx, const int vf_idx, const MvField *orig_mv, const int dmvr_flag, const int ciip_flag)
 {
     const VVCFrameContext *fc   = lc->fc;
+    const RefPicList *rpl       = lc->sc->rpl;
     const int hs                = fc->ps.sps->hshift[1];
     const int vs                = fc->ps.sps->vshift[1];
     const int idx               = av_log2(block_w) - 1;
@@ -381,7 +458,16 @@ static void chroma_mc_bi(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst_
         const int ox            = x_off + (mv->x >> (4 + hs));
         const int oy            = y_off + (mv->y >> (4 + vs));
         ptrdiff_t src_stride    = ref[i]->linesize[c_idx];
+        const int scale_x       = rpl->ref_pic_scale[mvf->ref_idx[i]][0];
+        const int scale_y       = rpl->ref_pic_scale[mvf->ref_idx[i]][1];
         const uint8_t *src      = ref[i]->data[c_idx] + oy * src_stride + (ox * (1 << fc->ps.sps->pixel_shift));
+        int x_sb                = x_off;
+        int y_sb                = y_off;
+        int mx_step, my_step;
+
+        rpr_derive_chroma(&x_sb, &mx_step, scale_x, mv->x);
+        rpr_derive_chroma(&y_sb, &my_step, scale_y, mv->y);
+
         const int8_t *hf        = ff_vvc_inter_chroma_filters[hf_idx][mx];
         const int8_t *vf        = ff_vvc_inter_chroma_filters[vf_idx][my];
         if (dmvr_flag) {
@@ -404,18 +490,27 @@ static void luma_prof_uni(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst
     const int cb_prof_flag, const int16_t *diff_mv_x, const int16_t *diff_mv_y)
 {
     const VVCFrameContext *fc   = lc->fc;
+    const RefPicList *rpl       = lc->sc->rpl;
     const uint8_t *src          = ref->data[0];
     ptrdiff_t src_stride        = ref->linesize[0];
     uint16_t *prof_tmp          = lc->tmp + PROF_TEMP_OFFSET;
     const int idx               = av_log2(block_w) - 1;
     const int lx                = mvf->pred_flag - PF_L0;
     const Mv *mv                = mvf->mv + lx;
+    const int scale_x           = rpl->ref_pic_scale[mvf->ref_idx[lx]][0];
+    const int scale_y           = rpl->ref_pic_scale[mvf->ref_idx[lx]][1];
     const int mx                = mv->x & 0xf;
     const int my                = mv->y & 0xf;
     const int8_t *hf            = ff_vvc_inter_luma_filters[4][mx];
     const int8_t *vf            = ff_vvc_inter_luma_filters[4][my];
     int denom, wx, ox;
     const int weight_flag       = derive_weight_uni(&denom, &wx, &ox, lc, mvf, LUMA);
+    int x_sb                = x_off;
+    int y_sb                = y_off;
+    int mx_step, my_step;
+
+    rpr_derive_luma(&x_sb, &mx_step, scale_x, mv->x);
+    rpr_derive_luma(&y_sb, &my_step, scale_y, mv->y);
 
     x_off += mv->x >> 4;
     y_off += mv->y >> 4;
@@ -442,6 +537,7 @@ static void luma_prof_bi(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst_
     const int block_w, const int block_h)
 {
     const VVCFrameContext *fc   = lc->fc;
+    const RefPicList *rpl       = lc->sc->rpl;
     const PredictionUnit *pu    = &lc->cu->pu;
     const AVFrame *ref[]        = { ref0, ref1 };
     int16_t *tmp[]              = { lc->tmp, lc->tmp1 };
@@ -457,7 +553,15 @@ static void luma_prof_bi(VVCLocalContext *lc, uint8_t *dst, const ptrdiff_t dst_
         const int ox            = x_off + (mv->x >> 4);
         const int oy            = y_off + (mv->y >> 4);
         ptrdiff_t src_stride    = ref[i]->linesize[0];
+        const int scale_x           = rpl->ref_pic_scale[mvf->ref_idx[i]][0];
+        const int scale_y           = rpl->ref_pic_scale[mvf->ref_idx[i]][1];
         const uint8_t *src      = ref[i]->data[0] + oy * src_stride + (ox * (1 << fc->ps.sps->pixel_shift));
+        int x_sb                = x_off;
+        int y_sb                = y_off;
+        int mx_step, my_step;
+
+        rpr_derive_luma(&x_sb, &mx_step, scale_x, mv->x);
+        rpr_derive_luma(&y_sb, &my_step, scale_y, mv->y);
         const int8_t *hf        = ff_vvc_inter_luma_filters[4][mx];
         const int8_t *vf        = ff_vvc_inter_luma_filters[4][my];
 
@@ -544,9 +648,9 @@ static void pred_gpm_blk(VVCLocalContext *lc)
             if (!ref)
                 return;
             if (c_idx)
-                chroma_mc(lc, tmp[i], ref->frame, mv->mv + lx, x, y, width, height, c_idx);
+                chroma_mc(lc, tmp[i], ref->frame, mv, lx, x, y, width, height, c_idx);
             else
-                luma_mc(lc, tmp[i], ref->frame, mv->mv + lx, x, y, width, height);
+                luma_mc(lc, tmp[i], ref->frame, mv, lx, x, y, width, height);
         }
         fc->vvcdsp.inter.put_gpm(dst, dst_stride, width, height, tmp[0], tmp[1], weights, step_x, step_y);
     }
