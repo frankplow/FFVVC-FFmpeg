@@ -12,7 +12,17 @@ jobs:
   ffvvc-test:
     name: ffvvc-test / ${{ matrix.os.name }}/${{ matrix.compiler.name }}/${{ matrix.assembler.name }}
     env:
-      configure_flags: --enable-ffmpeg --disable-everything --enable-decoder=vvc --enable-parser=vvc --enable-demuxer=vvc --enable-protocol=file,pipe --enable-encoder=rawvideo,wrapped_avframe --enable-muxer=rawvideo,md5,null
+      configure_flags: >-
+        --enable-ffmpeg
+        --disable-everything
+        --enable-libxml2
+        --enable-decoder=vvc
+        --enable-parser=vvc
+        --enable-demuxer=vvc,mpegts,mov,dash
+        --enable-bsf=vvc_mp4toannexb
+        --enable-protocol=file,pipe
+        --enable-encoder=rawvideo,wrapped_avframe
+        --enable-muxer=rawvideo,md5,null
     strategy:
       fail-fast: false
       matrix:
@@ -72,6 +82,7 @@ jobs:
         install: >-
           make
           diffutils
+          libxml2
 
     - name: Setup python package
       run: python3 -m pip install tqdm pyyaml
