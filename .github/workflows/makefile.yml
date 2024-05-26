@@ -94,7 +94,7 @@ jobs:
     - name: Get tests
       uses: actions/checkout@v3
       with:
-        repository: ffvvc/tests
+        repository: frankplow/tests
         path: tests
 
     - name: Unit test
